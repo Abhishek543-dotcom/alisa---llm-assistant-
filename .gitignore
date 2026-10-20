@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+.env/
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Sensitive & Large Raw Email Archives
+*.mbox
+mail.mbox
+
+# Processed Datasets (Contains personal email text)
+data/
+*.jsonl
+
+# Local Vector Database & Embeddings (Contains personal email chunks)
+chroma_db/
+*.sqlite3
+
+# Fine-Tuned Model Weights, Adapters & Checkpoints
+adapters/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# Environment & Secret Configurations
+.env
+.env.*
+!.env.example
+
+# IDEs & Code Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Caches & Logs
+.cache/
+*.log
