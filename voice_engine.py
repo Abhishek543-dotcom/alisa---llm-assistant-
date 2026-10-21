@@ -21,6 +21,11 @@ WAKE_WORD_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+STOP_LISTENING_REGEX = re.compile(
+    r"\b(?:stop\s+listening|go\s+to\s+sleep|sleep|stop\s+alisa|alisa\s+stop|exit\s+listening|pause\s+listening|shut\s+down)\b",
+    re.IGNORECASE,
+)
+
 
 class VoiceEngine:
     def __init__(
@@ -279,6 +284,14 @@ class VoiceEngine:
                 if not heard_text:
                     continue
 
+                # Check if user spoke a command to stop listening
+                if STOP_LISTENING_REGEX.search(heard_text):
+                    stream.stop()
+                    self.play_chime("Ping", block=True)
+                    print('\n😴 Alisa going to sleep (Microphone OFF)...')
+                    self.speak("Going to sleep now. You can turn listening back on anytime.", non_blocking=False)
+                    break
+
                 is_wake, command = self.strip_wake_word(heard_text)
                 if not is_wake:
                     # Voice heard, but not wake-word
@@ -290,6 +303,13 @@ class VoiceEngine:
                 print("\n")
                 # Temporarily stop stream to prevent feedback loops
                 stream.stop()
+
+                # Check if command was a stop command (e.g. "Alisa, stop listening" or "Alisa go to sleep")
+                if command and STOP_LISTENING_REGEX.search(command):
+                    self.play_chime("Ping", block=True)
+                    print('\n😴 Alisa going to sleep (Microphone OFF)...')
+                    self.speak("Going to sleep now. You can turn listening back on anytime.", non_blocking=False)
+                    break
 
                 # Play Alexa/Siri style wake chime
                 self.play_chime("Tink", block=True)
@@ -305,6 +325,12 @@ class VoiceEngine:
                     if command.startswith("["):
                         print(f"{command}")
                         command = ""
+
+                if command and STOP_LISTENING_REGEX.search(command):
+                    self.play_chime("Ping", block=True)
+                    print('\n😴 Alisa going to sleep (Microphone OFF)...')
+                    self.speak("Going to sleep now. You can turn listening back on anytime.", non_blocking=False)
+                    break
 
                 if command:
                     on_wake_detected(command)

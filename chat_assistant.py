@@ -18,6 +18,7 @@ from typing import List
 from auto_learner import AutoLearner, ingest_inbox_directory
 from memory_manager import MemoryManager
 from rag_engine import RAGEngine
+from system_tools import SystemTools
 from voice_engine import VoiceEngine
 
 CONVERSATIONAL_GREETINGS = {
@@ -113,6 +114,7 @@ def main() -> None:
     )
     learner = AutoLearner(db_dir=args.db_dir)
     voice = VoiceEngine(tts_enabled=(not args.no_voice))
+    tools = SystemTools()
 
     use_adapter = not args.no_adapter and os.path.exists(args.adapter_dir)
     adapter_path = args.adapter_dir if use_adapter else None
@@ -145,6 +147,15 @@ def main() -> None:
             model = base_model
 
     def answer_question(user_query: str, speak_sync: bool = False) -> str:
+        # Check system actions (volume, battery, apps, shell execution)
+        system_action_res = tools.match_and_execute(user_query)
+        if system_action_res:
+            if voice.tts_enabled:
+                print("\n[🔊 Alisa Speaking...]")
+                voice.speak(system_action_res, non_blocking=(not speak_sync))
+            memory.log_interaction(user_query, system_action_res, source="voice" if speak_sync else "console")
+            return system_action_res
+
         # Check conversational greetings & identity checks
         clean_q = user_query.strip().lower().rstrip("!?.")
         if clean_q in ("alisa", "hey alisa", "hi alisa", "hello alisa"):
@@ -152,6 +163,7 @@ def main() -> None:
             if voice.tts_enabled:
                 print("\n[🔊 Alisa Speaking...]")
                 voice.speak(reply, non_blocking=(not speak_sync))
+            memory.log_interaction(user_query, reply, source="voice" if speak_sync else "console")
             return reply
 
         if clean_q in ("who are you", "what is your name", "what's your name", "introduce yourself", "tell me about yourself"):
@@ -159,6 +171,7 @@ def main() -> None:
             if voice.tts_enabled:
                 print("\n[🔊 Alisa Speaking...]")
                 voice.speak(reply, non_blocking=(not speak_sync))
+            memory.log_interaction(user_query, reply, source="voice" if speak_sync else "console")
             return reply
 
         if clean_q in ("who am i", "what is my name", "what's my name"):
@@ -167,7 +180,26 @@ def main() -> None:
             if voice.tts_enabled:
                 print("\n[🔊 Alisa Speaking...]")
                 voice.speak(reply, non_blocking=(not speak_sync))
+            memory.log_interaction(user_query, reply, source="voice" if speak_sync else "console")
             return reply
+
+        # Check if querying past error troubleshooting solutions
+        if any(w in clean_q for w in ("how did we fix", "resolved", "solution for", "troubleshoot")) or (
+            "error" in clean_q and any(w in clean_q for w in ("fix", "solve", "how", "what was", "remember"))
+        ):
+            matched_solutions = memory.search_solutions(clean_q)
+            if matched_solutions:
+                sol_lines = ["I found the past solution in my error-resolution memory:"]
+                for s in matched_solutions[:2]:
+                    sol_lines.append(f"• Issue: {s['issue']}")
+                    sol_lines.append(f"  Root Cause: {s.get('root_cause', 'N/A')}")
+                    sol_lines.append(f"  Fix: {s['resolution']}")
+                reply = "\n".join(sol_lines)
+                if voice.tts_enabled:
+                    print("\n[🔊 Alisa Speaking...]")
+                    voice.speak(reply, non_blocking=(not speak_sync))
+                memory.log_interaction(user_query, reply, source="voice" if speak_sync else "console")
+                return reply
 
         if clean_q in CONVERSATIONAL_GREETINGS:
             email_context = ""
@@ -178,6 +210,7 @@ def main() -> None:
 
         dynamic_memory = memory.get_summary()
         learned_summary = learner.get_summary()
+        solutions_memory = memory.get_solution_summary()
 
         system_content = (
             "Your name is Alisa. You are Abhishek Tiwari's dedicated, highly capable, and intelligent personal AI assistant.\n"
@@ -189,6 +222,7 @@ def main() -> None:
             "=== DYNAMIC WORKING MEMORY (DISCOVERED ABOUT ABHISHEK - ZERO HARDCODING) ===\n"
             f"{dynamic_memory}\n\n"
             f"{learned_summary}\n\n"
+            f"{solutions_memory}\n\n"
             "=== RETRIEVED EVIDENCE FROM ARCHIVES & DOCUMENTS ===\n"
             f"{email_context}\n\n"
             "CRITICAL INSTRUCTIONS:\n"
@@ -214,6 +248,9 @@ def main() -> None:
             )
         else:
             reply = generate_hf(model, tokenizer, hf_device, messages, max_tokens=512)
+
+        # Log interaction for lifelong continuity
+        memory.log_interaction(user_query, reply, source="voice" if speak_sync else "console")
 
         # Trigger spoken speech if enabled
         if voice.tts_enabled:
@@ -350,18 +387,78 @@ def main() -> None:
             print(f"\n[Memory] {msg}")
             continue
 
+        # Lifelong Solution & Error History
+        elif lower_q in ("/solutions", "/errors", "/troubleshoot"):
+            sols = memory.load_solutions()
+            print("\n=== LIFELONG ERROR & SOLUTION MEMORY ===")
+            if not sols:
+                print("No solutions stored yet.")
+            for s in sols:
+                print(f"[{s['id']}] {s['issue']}")
+                print(f"       Root Cause: {s.get('root_cause', 'N/A')}")
+                print(f"       Resolution: {s['resolution']}\n")
+            continue
+
+        # Conversation History
+        elif lower_q in ("/history", "/turns"):
+            hist = memory.get_recent_history(limit=5)
+            print("\n=== RECENT CONVERSATION HISTORY ===")
+            if not hist:
+                print("No prior conversation history recorded.")
+            for h in hist:
+                print(f"• [{h.get('timestamp', '')}] ({h.get('source', '')})")
+                print(f"  User:  {h.get('query', '')}")
+                print(f"  Alisa: {h.get('answer', '')[:100]}...\n")
+            continue
+
+        # System Controls
+        elif lower_q in ("/battery", "/power"):
+            print(f"\n[System] {tools.get_battery_status()}")
+            continue
+
+        elif lower_q.startswith("/volume"):
+            arg = q[len("/volume") :].strip()
+            if arg:
+                try:
+                    lvl = int(arg)
+                    print(f"\n[System] {tools.set_volume(lvl)}")
+                except ValueError:
+                    print("Usage: /volume <0-100>")
+            else:
+                print(f"\n[System] {tools.get_volume()}")
+            continue
+
+        elif lower_q in ("/stats", "/system"):
+            st = tools.get_system_stats()
+            print("\n=== SYSTEM HEALTH & METRICS ===")
+            print(f"• RAM Usage: {st.get('ram_pct')}% ({st.get('ram_used_gb')}GB / {st.get('ram_total_gb')}GB)")
+            print(f"• CPU Load:  {st.get('cpu_pct')}%")
+            print(f"• Free Disk: {st.get('disk_free_gb')}GB / {st.get('disk_total_gb')}GB")
+            continue
+
+        elif lower_q.startswith("/run "):
+            bash_cmd = q[len("/run ") :].strip()
+            ok, out = tools.run_bash_command(bash_cmd)
+            prefix = "✓" if ok else "✗"
+            print(f"\n[{prefix} Executed: {bash_cmd}]\n{out}")
+            continue
+
         elif lower_q in ("/help", "/?"):
             print("\nAvailable Commands:")
-            print("  /listen                  Hands-free continuous mode (say 'Alisa' to wake)")
+            print("  /listen                  Hands-free continuous mode (say 'Alisa' to wake, 'stop' to sleep)")
             print("  /speak                   Speak question via microphone (MLX Whisper)")
             print("  /voice                   Toggle spoken voice output (macOS say)")
+            print("  /battery                 Check current battery percentage and power source")
+            print("  /volume [0-100]          Check or set macOS output volume")
+            print("  /stats                   Check RAM, CPU, and Disk status")
+            print("  /run <command>           Run a bash command directly")
+            print("  /solutions               View lifelong error & troubleshooting memory")
+            print("  /history                 View recent conversation history")
             print("  /learn <file or text>    Ingest and learn any file (.pdf, .txt, .csv) or note")
             print("  /scan                    Ingest all files placed in the inbox/ folder")
-            print("  /attach                  Attach ChromaDB vector search")
-            print("  /detach                  Detach ChromaDB vector search")
-            print("  /rag status              Check vector database status")
+            print("  /attach | /detach        Attach or detach ChromaDB vector search")
             print("  /memory                  View discovered profile and learned knowledge")
-            print("  /remember <key>: <value> Save a fact to memory")
+            print("  /remember <key>: <value> Save a custom fact to memory")
             print("  exit                     Quit")
             continue
 

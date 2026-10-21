@@ -12,10 +12,13 @@ import email.utils
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 
 MEMORY_FILE = "data/profile_memory.json"
+HISTORY_FILE = "data/conversation_history.jsonl"
+SOLUTIONS_FILE = "data/solution_memory.json"
 
 DISALLOWED_SUBSTRINGS = [
     "experience", "designation", "location", "salary", "ctc", "notice",
@@ -75,12 +78,79 @@ class MemoryManager:
         with open(self.memory_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-    def remember(self, key: str, value: str) -> str:
-        """Stores or updates a custom user fact dynamically."""
-        key_clean = key.strip().lower().replace(" ", "_")
-        self.data["custom_notes"][key_clean] = value.strip()
-        self._save()
-        return f"Stored in memory: '{key_clean}' = '{value.strip()}'"
+    def log_interaction(self, query: str, answer: str, source: str = "console") -> None:
+        """Appends conversation turn to persistent history for lifelong memory."""
+        os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+        entry = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "source": source,
+            "query": query.strip(),
+            "answer": answer.strip(),
+        }
+        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def get_recent_history(self, limit: int = 5) -> List[Dict[str, str]]:
+        """Retrieves the last N conversation interactions."""
+        if not os.path.exists(HISTORY_FILE):
+            return []
+        lines = []
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f if line.strip()]
+            recent = [json.loads(l) for l in lines[-limit:]]
+            return recent
+        except Exception:
+            return []
+
+    def save_solution(self, issue: str, resolution: str, root_cause: str = "", tags: Optional[List[str]] = None) -> str:
+        """Saves a troubleshooting fix to lifelong solution memory."""
+        solutions = self.load_solutions()
+        sol_id = f"sol_{len(solutions) + 1:03d}"
+        new_entry = {
+            "id": sol_id,
+            "issue": issue.strip(),
+            "root_cause": root_cause.strip(),
+            "resolution": resolution.strip(),
+            "tags": tags or ["troubleshooting", "learning"],
+        }
+        solutions.append(new_entry)
+        os.makedirs(os.path.dirname(SOLUTIONS_FILE), exist_ok=True)
+        with open(SOLUTIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(solutions, f, indent=2, ensure_ascii=False)
+        return f"Stored solution [{sol_id}]: {issue}"
+
+    def load_solutions(self) -> List[Dict[str, Any]]:
+        """Loads all documented error resolutions."""
+        if not os.path.exists(SOLUTIONS_FILE):
+            return []
+        try:
+            with open(SOLUTIONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def search_solutions(self, query: str) -> List[Dict[str, Any]]:
+        """Searches past resolved errors by keywords."""
+        solutions = self.load_solutions()
+        words = query.lower().split()
+        matches = []
+        for sol in solutions:
+            text = f"{sol.get('issue', '')} {sol.get('root_cause', '')} {sol.get('resolution', '')} {' '.join(sol.get('tags', []))}".lower()
+            if any(w in text for w in words):
+                matches.append(sol)
+        return matches
+
+    def get_solution_summary(self) -> str:
+        """Returns concise summary of past fixes for model prompt."""
+        solutions = self.load_solutions()
+        if not solutions:
+            return ""
+        lines = ["=== LIFELONG ERROR & SOLUTION MEMORY (HOW ISSUES WERE RESOLVED) ==="]
+        for s in solutions[-5:]:  # Most recent 5
+            lines.append(f"• Issue: {s['issue']}")
+            lines.append(f"  Fix: {s['resolution']}")
+        return "\n".join(lines)
 
     def recall(self, key: Optional[str] = None) -> Any:
         if key:

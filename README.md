@@ -15,30 +15,42 @@ A zero-hardcoding, fully autonomous local AI assistant named **Alisa** optimized
 
 ## Quick Start: Launching Alisa
 
-### 1. Hands-Free Wake-Word Mode (Alexa / Siri Experience)
-```bash
-./alisa.sh --listen
-# OR
-source .venv/bin/activate
-python3 alisa.py --listen
-```
-Say **"Alisa"** (you'll hear the wake chime), then ask your question! Or say it all in one breath: *"Alisa, where do I work?"*
-
-### 2. Interactive Console Mode (Chat + Push-to-Talk)
+### 1. Production Dashboard & Control Center
 ```bash
 ./alisa.sh
-# OR
-source .venv/bin/activate
-python3 alisa.py
 ```
+Launches the full interactive terminal application with system metrics, memory inspection, one-click fine-tuning, knowledge ingestion, and audio diagnostics.
+
+### 2. Hands-Free Wake-Word Mode (Alexa / Siri Experience)
+```bash
+./alisa.sh --listen
+# OR from inside the console: /listen
+```
+* **To Wake:** Say **"Alisa"** or **"Hey Alisa"** (chime plays).
+* **To Sleep:** Say **"Stop listening"**, **"Go to sleep"**, or press `Ctrl+C` — the microphone shuts down smoothly and returns you to the menu!
+
+### 3. System Control & Autonomous Agent Capabilities
+Alisa can directly control system settings and execute tasks:
+* *"What is my battery level?"* -> Checks battery % and power source.
+* *"Set volume to 50%"* / *"Mute volume"* -> Adjusts macOS system audio.
+* *"What are my system stats?"* -> Reports live RAM %, CPU load, and free disk space.
+* *"Open Chrome"* / *"Open Notes"* -> Launches macOS applications.
+* *"How did we fix the ffmpeg issue?"* -> Recalls exact troubleshooting solutions from lifelong memory.
+* `/run <command>` -> Executes terminal shell commands safely in the workspace.
 
 ---
 
 ## Commands Inside Alisa
 
-* `/listen` — Enter hands-free continuous Alexa/Siri mode (say "Alisa" to trigger)
+* `/listen` — Enter hands-free continuous Alexa/Siri mode (say "Alisa" to trigger, "stop" to sleep)
 * `/speak` — Push-to-talk mic mode (records 5s with MLX Whisper)
 * `/voice` — Toggle spoken voice output on or off
+* `/battery` — Check macOS battery percentage and power status
+* `/volume [0-100]` — Inspect or adjust system output volume
+* `/stats` — View live RAM, CPU load, and free disk storage
+* `/solutions` — View lifelong documented error resolutions and fixes
+* `/history` — Review past conversation interactions
+* `/run <command>` — Execute bash commands directly
 * `/learn <file or text>` — Ingest and learn any file (`.pdf`, `.txt`, `.csv`, etc.) or note
 * `/scan` — Ingest all files dropped in the `inbox/` directory
 * `/attach` or `/rag on` — Attach ChromaDB vector search
