@@ -21,12 +21,17 @@ from rag_engine import RAGEngine
 from voice_engine import VoiceEngine
 
 CONVERSATIONAL_GREETINGS = {
+    "alisa",
+    "hey alisa",
+    "hi alisa",
+    "hello alisa",
     "hello",
     "hi",
     "hey",
     "howdy",
     "greetings",
     "who are you",
+    "what is your name",
     "what can you do",
     "help",
     "good morning",
@@ -82,6 +87,7 @@ def main() -> None:
     parser.add_argument("--db-dir", default="chroma_db", help="ChromaDB directory")
     parser.add_argument("--no-rag", action="store_true", help="Start with ChromaDB detached")
     parser.add_argument("--no-voice", action="store_true", help="Disable spoken voice output (macOS say is ON by default)")
+    parser.add_argument("--listen", action="store_true", help="Start immediately in hands-free wake-word listening mode ('Alisa')")
     parser.add_argument("--embedding-model", default="BAAI/bge-small-en-v1.5", help="Embedding model ID")
     parser.add_argument("--backend", choices=["auto", "mlx", "hf"], default="auto", help="Inference backend")
     parser.add_argument("--top-k", type=int, default=4, help="Number of emails/docs to retrieve via RAG")
@@ -139,8 +145,30 @@ def main() -> None:
             model = base_model
 
     def answer_question(user_query: str, speak_sync: bool = False) -> str:
-        # Check conversational greetings
+        # Check conversational greetings & identity checks
         clean_q = user_query.strip().lower().rstrip("!?.")
+        if clean_q in ("alisa", "hey alisa", "hi alisa", "hello alisa"):
+            reply = "Hello Abhishek! I am Alisa, your personal assistant. I'm listening, how can I help you today?"
+            if voice.tts_enabled:
+                print("\n[🔊 Alisa Speaking...]")
+                voice.speak(reply, non_blocking=(not speak_sync))
+            return reply
+
+        if clean_q in ("who are you", "what is your name", "what's your name", "introduce yourself", "tell me about yourself"):
+            reply = "I am Alisa, your autonomous personal AI assistant. I know your career history, records, and documents, and I am here to assist you with anything you need!"
+            if voice.tts_enabled:
+                print("\n[🔊 Alisa Speaking...]")
+                voice.speak(reply, non_blocking=(not speak_sync))
+            return reply
+
+        if clean_q in ("who am i", "what is my name", "what's my name"):
+            curr_co = memory.get_latest_company()
+            reply = f"You are Abhishek Tiwari, currently working at {curr_co}."
+            if voice.tts_enabled:
+                print("\n[🔊 Alisa Speaking...]")
+                voice.speak(reply, non_blocking=(not speak_sync))
+            return reply
+
         if clean_q in CONVERSATIONAL_GREETINGS:
             email_context = ""
         elif rag.is_attached:
@@ -152,7 +180,12 @@ def main() -> None:
         learned_summary = learner.get_summary()
 
         system_content = (
-            "You are Abhishek Tiwari's autonomous personal AI assistant.\n\n"
+            "Your name is Alisa. You are Abhishek Tiwari's dedicated, highly capable, and intelligent personal AI assistant.\n"
+            "You are NOT Abhishek Tiwari; Abhishek Tiwari is your boss/creator, and you are speaking directly to him.\n"
+            "You know everything about Abhishek: his career journey, background, preferences, skills, and documents.\n"
+            "You can do anything he asks: answer personal or technical questions, analyze documents, reason, summarize records, and draft messages.\n"
+            "Personality: Warm, confident, respectful, intelligent, concise, conversational, and direct (just like Alexa or Siri).\n"
+            "Always address Abhishek directly. Answer accurately without unnecessary conversational fluff or preambles.\n\n"
             "=== DYNAMIC WORKING MEMORY (DISCOVERED ABOUT ABHISHEK - ZERO HARDCODING) ===\n"
             f"{dynamic_memory}\n\n"
             f"{learned_summary}\n\n"
@@ -184,9 +217,18 @@ def main() -> None:
 
         # Trigger spoken speech if enabled
         if voice.tts_enabled:
-            print("\n[🔊 Speaking response...]")
+            print("\n[🔊 Alisa Speaking...]")
             voice.speak(reply, non_blocking=(not speak_sync))
         return reply
+
+    def handle_voice_query(cmd: str):
+        print(f"\nYou (Voice) > {cmd}")
+        ans = answer_question(cmd, speak_sync=True)
+        print(f"\nAlisa > {ans}")
+
+    if args.listen:
+        voice.listen_for_wake_word(on_wake_detected=handle_voice_query)
+        return
 
     if args.query:
         ans = answer_question(args.query, speak_sync=True)
@@ -194,13 +236,15 @@ def main() -> None:
         return
 
     print("=" * 65)
-    print("🚀 Abhishek's Autonomous Personal AI Assistant")
+    print("✨ Alisa — Abhishek's Autonomous Personal Voice AI Assistant")
+    print("   • Wake Word: Say \"Alisa\" or \"Hey Alisa\" (macOS chime activation)")
     print(f"   • ChromaDB RAG: {'ATTACHED (' + str(rag.count_chunks()) + ' chunks)' if rag.is_attached else 'DETACHED'}")
-    print(f"   • Voice Speech (TTS): {'ENABLED (macOS say)' if voice.tts_enabled else 'MUTED (Type /voice to enable)'}")
+    print(f"   • Voice Speech (TTS): {'ENABLED (Samantha)' if voice.tts_enabled else 'MUTED (Type /voice to enable)'}")
     print(f"   • Drop Folder: inbox/ (drop any file to learn autonomously)")
     print("=" * 65)
     print("   [Commands]")
-    print("   /speak                   -> Speak your question via microphone (MLX Whisper)")
+    print("   /listen                  -> Hands-free continuous Alexa/Siri mode (Wake: 'Alisa')")
+    print("   /speak                   -> Push-to-talk mic mode (MLX Whisper)")
     print("   /voice                   -> Toggle spoken voice output (TTS)")
     print("   /learn <file or note>    -> Ingest, index, and learn from any file or text")
     print("   /scan                    -> Ingest all files dropped in inbox/")
@@ -208,7 +252,7 @@ def main() -> None:
     print("   /memory                  -> View dynamically discovered memory profile")
     print("   /remember <key>: <value> -> Add a custom fact to memory")
     print("   /help                    -> Show commands")
-    print("   exit                     -> Quit assistant")
+    print("   exit                     -> Quit Alisa")
     print("=" * 65)
 
     while True:
@@ -232,8 +276,16 @@ def main() -> None:
             if spoken_text.startswith("["):
                 print(f"\n{spoken_text}")
                 continue
-            print(f"\nYou (Voice) > {spoken_text}")
-            q = spoken_text
+            # If user said "Alisa, <question>", strip wake word for cleaner processing
+            _, cmd = voice.strip_wake_word(spoken_text)
+            final_query = cmd if cmd else spoken_text
+            print(f"\nYou (Voice) > {final_query}")
+            q = final_query
+
+        # Hands-free Wake-Word mode
+        elif lower_q in ("/listen", "/wake", "/handsfree"):
+            voice.listen_for_wake_word(on_wake_detected=handle_voice_query)
+            continue
 
         # Voice TTS toggle
         elif lower_q in ("/voice", "/voice on", "/voice off"):
@@ -300,6 +352,7 @@ def main() -> None:
 
         elif lower_q in ("/help", "/?"):
             print("\nAvailable Commands:")
+            print("  /listen                  Hands-free continuous mode (say 'Alisa' to wake)")
             print("  /speak                   Speak question via microphone (MLX Whisper)")
             print("  /voice                   Toggle spoken voice output (macOS say)")
             print("  /learn <file or text>    Ingest and learn any file (.pdf, .txt, .csv) or note")
@@ -312,7 +365,7 @@ def main() -> None:
             print("  exit                     Quit")
             continue
 
-        print("\nAssistant >", answer_question(q))
+        print("\nAlisa >", answer_question(q))
 
 
 if __name__ == "__main__":
