@@ -1,27 +1,42 @@
 #!/usr/bin/env python3
 """
 auto_learner.py
-Autonomous Knowledge Ingestion & Universal Document Learning Engine:
-  - Ingests ANY file dumped by the user: .pdf, .txt, .md, .csv, .json, .py, .mbox, etc.
+Autonomous Knowledge Ingestion & Universal Document Learning Engine for Alisa:
+  - Ingests ANY file dropped in inbox/ or passed via /learn (.pdf, .txt, .md, .csv, .json, .py, .sh, .mbox, etc.).
   - Zero hardcoding: extracts facts, dates, entities, and timelines autonomously.
   - Automatically indexes chunks into local ChromaDB vector store.
-  - Automatically generates instruction fine-tuning pairs in data/train.jsonl for continuous learning.
-  - Updates dynamic knowledge memory in data/learned_memory.json.
+  - Automatically updates and balances train/valid/test datasets via DatasetBuilder.
+  - Tracks processed file signatures in data/processed_files.json to avoid duplicate processing.
+  - Safely handles large archives (.mbox) by delegating to streaming parser.
 """
 
 import argparse
 import csv
 import datetime
-import email.utils
+import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 from typing import Dict, List, Optional, Tuple
+
+from dataset_builder import DatasetBuilder
 
 
 LEARNED_MEMORY_FILE = "data/learned_memory.json"
+PROCESSED_FILES_FILE = "data/processed_files.json"
 CHROMA_DIR = "chroma_db"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
+
+def get_file_signature(filepath: str) -> str:
+    """Computes quick file signature using mtime and size."""
+    try:
+        st = os.stat(filepath)
+        return f"{st.st_size}_{st.st_mtime}"
+    except Exception:
+        return "unknown"
 
 
 class UniversalParser:
@@ -39,7 +54,7 @@ class UniversalParser:
         stat = os.stat(file_path)
         file_mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
 
-        if ext in (".txt", ".md", ".markdown", ".log"):
+        if ext in (".txt", ".md", ".markdown", ".log", ".rst"):
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read().strip()
             if content:
@@ -69,7 +84,6 @@ class UniversalParser:
                 reader = csv.DictReader(f)
                 rows = list(reader)
                 if rows:
-                    fieldnames = reader.fieldnames or []
                     for idx, row in enumerate(rows):
                         row_text = ", ".join(f"{k}: {v}" for k, v in row.items() if v)
                         records.append({
@@ -104,7 +118,7 @@ class UniversalParser:
                     except Exception:
                         pass
 
-        elif ext in (".py", ".js", ".ts", ".html", ".css", ".sh", ".sql", ".yaml", ".yml"):
+        elif ext in (".py", ".js", ".ts", ".html", ".css", ".sh", ".sql", ".yaml", ".yml", ".go", ".rs", ".c", ".cpp"):
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 code = f.read().strip()
             if code:
@@ -115,21 +129,16 @@ class UniversalParser:
                 })
 
         elif ext == ".mbox":
-            import mailbox
-            mbox = mailbox.mbox(file_path)
-            for idx, msg in enumerate(mbox):
-                payload = msg.get_payload()
-                if isinstance(payload, list):
-                    body = "".join(str(p.get_payload()) for p in payload if not p.is_multipart())
-                else:
-                    body = str(payload)
-                subj = msg.get("Subject", "(No Subject)")
-                date_str = msg.get("Date", file_mtime)
-                records.append({
-                    "id": f"{base_name}_msg{idx}",
-                    "text": f"Date: {date_str}\nSubject: {subj}\n\n{body[:4000]}",
-                    "metadata": {"source": base_name, "type": "email", "subject": subj[:150], "date": date_str},
-                })
+            # For .mbox files, alert user to use streaming parser
+            print(f"[auto_learner] Found mailbox archive: {file_path}. Processing via streaming parse_mbox...")
+            subprocess.run([
+                sys.executable,
+                "parse_mbox.py",
+                "--mbox", file_path,
+                "--output-dir", "data",
+            ], check=False)
+            return []
+
         else:
             # Fallback text decoder
             try:
@@ -152,6 +161,7 @@ class AutoLearner:
         self.db_dir = db_dir
         self.memory_file = memory_file
         self.learned_data = self._load_learned_memory()
+        self.dataset_builder = DatasetBuilder()
 
     def _load_learned_memory(self) -> Dict:
         if os.path.exists(self.memory_file):
@@ -191,12 +201,13 @@ class AutoLearner:
         """Parses, indexes, and extracts knowledge from any file autonomously."""
         records = UniversalParser.parse_file(file_path)
         if not records:
+            if file_path.endswith(".mbox"):
+                return f"Mailbox archive '{os.path.basename(file_path)}' processed and synced to data/."
             return f"No parseable text extracted from {file_path}."
         return self._process_records(records, os.path.basename(file_path))
 
     def _process_records(self, records: List[Dict], source_name: str) -> str:
         chunks_to_index: List[Tuple[str, str, Dict]] = []
-        new_facts: List[str] = []
 
         # 1. Chunk and prepare for ChromaDB
         for r in records:
@@ -223,8 +234,8 @@ class AutoLearner:
         # 3. Store into ChromaDB
         self._upsert_to_chroma(chunks_to_index)
 
-        # 4. Generate training instruction pairs in data/train.jsonl
-        self._generate_training_pairs(records)
+        # 4. Generate balanced, deduplicated all-rounder train/valid/test datasets
+        ds_stats = self.dataset_builder.build_all_rounder_dataset(inbox_records=records)
 
         if source_name not in self.learned_data["ingested_sources"]:
             self.learned_data["ingested_sources"].append(source_name)
@@ -234,16 +245,13 @@ class AutoLearner:
             f"Successfully learned from '{source_name}':\n"
             f"  • Extracted {len(records)} records ({len(chunks_to_index)} chunks indexed in ChromaDB)\n"
             f"  • Stored in dynamic memory ({len(self.learned_data['extracted_facts'])} total facts known)\n"
-            f"  • Generated training pairs for future model fine-tuning in data/train.jsonl"
+            f"  • Updated All-Rounder Datasets: {ds_stats['train_examples']} train | {ds_stats['valid_examples']} valid | {ds_stats['test_examples']} test examples"
         )
 
     def _extract_autonomous_facts(self, text: str, metadata: Dict) -> None:
         """Extracts facts, dates, and entities autonomously without any hardcoded assumptions."""
-        date_val = metadata.get("date", "")
-        # Detect key statement patterns (e.g., 'X joined Y', 'Current role is Z', 'Skills: ...', etc.)
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         for line in lines:
-            # Autonomous key-value extraction (e.g. "Key: Value" or "Attribute = Value")
             if ":" in line and len(line) < 200:
                 parts = line.split(":", 1)
                 k, v = parts[0].strip(), parts[1].strip()
@@ -252,7 +260,6 @@ class AutoLearner:
                     if fact_entry not in self.learned_data["extracted_facts"]:
                         self.learned_data["extracted_facts"].append(fact_entry)
 
-            # Autonomous date/timeline extraction
             date_match = re.search(r"\b(201\d|202\d)\b", line)
             if date_match and len(line) < 160:
                 self.learned_data["chronological_events"].append({
@@ -261,9 +268,7 @@ class AutoLearner:
                     "source": metadata.get("source", "unknown"),
                 })
 
-        # Keep chronological events sorted so latest events are always on top!
         self.learned_data["chronological_events"].sort(key=lambda x: x["year"], reverse=True)
-        # Cap list sizes to prevent unbounded growth
         self.learned_data["extracted_facts"] = self.learned_data["extracted_facts"][-500:]
         self.learned_data["chronological_events"] = self.learned_data["chronological_events"][-200:]
 
@@ -290,37 +295,6 @@ class AutoLearner:
             embs = embedder.encode(b_docs, normalize_embeddings=True, show_progress_bar=False).tolist()
             collection.upsert(ids=b_ids, documents=b_docs, metadatas=b_metas, embeddings=embs)
 
-    def _generate_training_pairs(self, records: List[Dict]) -> None:
-        """Autonomously converts learned records into Q&A training pairs in data/train.jsonl."""
-        train_path = "data/train.jsonl"
-        os.makedirs(os.path.dirname(train_path) or ".", exist_ok=True)
-        pairs = []
-
-        system_prompt = "You are Abhishek Tiwari's personal AI assistant. Answer accurately based on verified personal knowledge."
-
-        for r in records:
-            src = r["metadata"].get("source", "document")
-            text = r["text"]
-            if len(text) < 50:
-                continue
-
-            # Generate synthetic learning pair
-            user_prompt = f"What information is recorded in {src} regarding:\n{text[:200]}...?"
-            assistant_reply = text[:1500]
-
-            pairs.append({
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                    {"role": "assistant", "content": assistant_reply},
-                ]
-            })
-
-        if pairs:
-            with open(train_path, "a", encoding="utf-8") as f:
-                for p in pairs[:20]:  # Append top synthetic pairs
-                    f.write(json.dumps(p, ensure_ascii=False) + "\n")
-
     def get_summary(self) -> str:
         """Returns completely dynamic, zero-hardcoded learned memory summary."""
         lines = []
@@ -340,28 +314,63 @@ class AutoLearner:
             for f in facts[-15:]:
                 lines.append(f"  • {f}")
 
-        return "\n".join(lines) if lines else "No external files ingested yet. Drop files or use /learn to teach me."
+        return "\n".join(lines) if lines else "No external files ingested yet. Drop files in inbox/ or use /learn to teach me."
 
 
-def ingest_inbox_directory(inbox_dir: str = "inbox") -> None:
-    """Scans an inbox/ directory and autonomously ingests all new files."""
+def load_processed_files() -> Dict[str, str]:
+    if os.path.exists(PROCESSED_FILES_FILE):
+        try:
+            with open(PROCESSED_FILES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_processed_files(data: Dict[str, str]) -> None:
+    os.makedirs(os.path.dirname(PROCESSED_FILES_FILE) or ".", exist_ok=True)
+    with open(PROCESSED_FILES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def ingest_inbox_directory(inbox_dir: str = "inbox", force: bool = False) -> None:
+    """Scans an inbox/ directory and autonomously ingests all new or updated files."""
     if not os.path.exists(inbox_dir):
         os.makedirs(inbox_dir, exist_ok=True)
         print(f"Created drop folder '{inbox_dir}'. Drop any file (.pdf, .txt, .csv, .py, etc.) here to learn.")
         return
 
     learner = AutoLearner()
+    processed_map = load_processed_files()
     files = [os.path.join(inbox_dir, f) for f in os.listdir(inbox_dir) if not f.startswith(".")]
+
     if not files:
         print(f"Drop folder '{inbox_dir}' is empty. Place any file here to learn it automatically.")
         return
 
-    print(f"[auto_learner] Found {len(files)} file(s) in '{inbox_dir}'. Learning autonomously...")
+    print(f"[auto_learner] Found {len(files)} file(s) in '{inbox_dir}'.")
+    new_ingested = 0
+
     for fpath in files:
-        if os.path.isfile(fpath):
-            print(f"\n--- Ingesting {os.path.basename(fpath)} ---")
-            res = learner.learn_file(fpath)
-            print(res)
+        if not os.path.isfile(fpath):
+            continue
+
+        bname = os.path.basename(fpath)
+        sig = get_file_signature(fpath)
+
+        if not force and processed_map.get(bname) == sig:
+            print(f"  [Skipped] {bname} (Already ingested and unchanged)")
+            continue
+
+        print(f"\n--- Ingesting {bname} ---")
+        res = learner.learn_file(fpath)
+        print(res)
+        processed_map[bname] = sig
+        new_ingested += 1
+
+    save_processed_files(processed_map)
+    if new_ingested == 0:
+        print("\nAll files in inbox/ are already up to date. (Use --force to re-learn).")
 
 
 if __name__ == "__main__":
@@ -369,6 +378,7 @@ if __name__ == "__main__":
     parser.add_argument("--file", help="Path to any file to ingest and learn")
     parser.add_argument("--text", help="Raw text to learn immediately")
     parser.add_argument("--inbox", default="inbox", help="Directory to scan for dropped files")
+    parser.add_argument("--force", action="store_true", help="Force re-learning files even if unchanged")
     args = parser.parse_args()
 
     learner = AutoLearner()
@@ -377,4 +387,4 @@ if __name__ == "__main__":
     elif args.text:
         print(learner.learn_text(args.text))
     else:
-        ingest_inbox_directory(args.inbox)
+        ingest_inbox_directory(args.inbox, force=args.force)

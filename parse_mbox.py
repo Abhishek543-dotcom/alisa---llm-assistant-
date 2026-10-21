@@ -258,11 +258,32 @@ def detect_user_email(mbox: mailbox.mbox, sample_limit: int = 5000) -> Optional[
     return None
 
 
+def find_default_mbox() -> str:
+    """Finds default mbox in inbox/, current dir, or Downloads."""
+    candidates = [
+        "inbox/All mail Including Spam and Trash-002.mbox",
+        "./All mail Including Spam and Trash-002.mbox",
+        os.path.expanduser("~/Downloads/All mail Including Spam and Trash-002.mbox"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    # Check any .mbox in inbox/ or current dir
+    if os.path.exists("inbox"):
+        for f in os.listdir("inbox"):
+            if f.endswith(".mbox"):
+                return os.path.join("inbox", f)
+    for f in os.listdir("."):
+        if f.endswith(".mbox"):
+            return f
+    return os.path.expanduser("~/Downloads/All mail Including Spam and Trash-002.mbox")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse and filter Gmail mbox for RAG and LoRA fine-tuning.")
     parser.add_argument(
         "--mbox",
-        default="/Users/abhishektiwari/Downloads/All mail Including Spam and Trash-002.mbox",
+        default=find_default_mbox(),
         help="Path to the Gmail Takeout .mbox file",
     )
     parser.add_argument("--output-dir", default="data", help="Output directory for JSONL datasets")
@@ -436,9 +457,17 @@ def main() -> None:
     except Exception as e:
         print(f"[parse_mbox] Note: memory profile sync skipped ({e})")
 
+    # Build balanced All-Rounder instruction dataset with 3-way split (train/valid/test)
+    try:
+        from dataset_builder import DatasetBuilder
+        builder = DatasetBuilder(output_dir=args.output_dir)
+        stats = builder.build_all_rounder_dataset(val_ratio=args.val_ratio, test_ratio=args.val_ratio)
+        print(f"[parse_mbox] Generated balanced All-Rounder dataset: {stats['train_examples']} train, {stats['valid_examples']} valid, {stats['test_examples']} test examples.")
+    except Exception as e:
+        print(f"[parse_mbox] Note: DatasetBuilder warning ({e})")
+
     print(f"[parse_mbox] Kept {len(corpus_records)} clean emails (filtered {skipped_count} spam/trash/promo emails).")
     print(f"[parse_mbox] Saved RAG corpus to {corpus_path}")
-    print(f"[parse_mbox] Saved {len(train_set)} train and {len(valid_set)} validation examples to {args.output_dir}/")
 
 
 if __name__ == "__main__":

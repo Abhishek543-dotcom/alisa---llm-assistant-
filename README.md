@@ -1,47 +1,82 @@
-# Alisa — Abhishek's Autonomous Personal Voice AI Assistant
+# Alisa — Abhishek's Autonomous All-Rounder Personal Voice AI Assistant
 
 A zero-hardcoding, fully autonomous local AI assistant named **Alisa** optimized for Apple Silicon (MacBook Air / M-Series) combining:
 1. **Wake-Word & Hands-Free Interaction** ([`voice_engine.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/voice_engine.py)):
    * **Wake Word:** Say `"Alisa"` or `"Hey Alisa"` anytime to wake her up like Alexa or Siri.
    * **Wake Chime:** Plays macOS native alert sound (`Tink.aiff`) on activation.
    * **Text-to-Speech (TTS):** Uses macOS native `/usr/bin/say -v Samantha` (0 RAM, 0 GPU overhead, crystal-clear female voice).
-   * **Speech-to-Text (STT):** Uses Apple Silicon `mlx-whisper` (`whisper-tiny`) running directly on Metal GPU for ~80ms in-memory speech transcription (zero ffmpeg dependency).
-2. **Zero Hardcoding Dynamic Memory** ([`memory_manager.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/memory_manager.py)): Learns Abhishek's profile, contacts, and chronological career progression directly from your data without any hardcoded assumptions.
-3. **Universal Autonomous Learner** ([`auto_learner.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/auto_learner.py)): Drop ANY file (`.pdf`, `.txt`, `.csv`, `.json`, `.py`, `.mbox`, etc.) into `inbox/` or use `/learn`—it automatically parses, indexes into ChromaDB, extracts knowledge, and generates fine-tuning training pairs for future model training.
-4. **Dynamic ChromaDB Vector Search** ([`rag_engine.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/rag_engine.py)): Attach or detach vector search on the fly (`/attach`, `/detach`).
-5. **Temporal Awareness & Recency Priority**: Parses timestamps so newer records always take precedence (e.g. knowing your latest company from the newest emails).
+   * **Speech-to-Text (STT):** Uses Apple Silicon `mlx-whisper` (`whisper-tiny`) running directly on Metal GPU for ~80ms in-memory speech transcription.
+2. **Model Versioning & Instant Rollback System** ([`model_manager.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/model_manager.py)):
+   * **Version v0 (Fresh Base):** Guaranteed clean untuned baseline model.
+   * **Auto-Versioning (v1, v2, v3...):** Automatically increments version after every fine-tune or inbox ingestion run.
+   * **One-Click Hot-Swap & Rollback:** Revert to previous version or reset to fresh base instantly inside the console or from the menu.
+3. **Standalone Base Model Downloader** ([`model_manager.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/model_manager.py)):
+   * One-click download and cache base models (Qwen2.5 0.5B, 1.5B, Coder, Llama 3.2 1B, 3B, Whisper, or any Hugging Face repo).
+4. **All-Rounder Multi-Task Instruction Engine** ([`dataset_builder.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/dataset_builder.py)):
+   * Expands Alisa beyond email into a complete software engineering, debugging, reasoning, system orchestration, and life assistant.
+   * Clean 3-way split: `train.jsonl` (80%), `valid.jsonl` (10%), and `test.jsonl` (10%) with SHA-256 deduplication.
+5. **Universal Autonomous Learner** ([`auto_learner.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/auto_learner.py)):
+   * Drop ANY file (`.pdf`, `.txt`, `.csv`, `.json`, `.py`, `.sh`, `.mbox`, etc.) into `inbox/` or use `/learn`.
+   * Indexes into ChromaDB, tracks processed files in `data/processed_files.json`, and updates balanced datasets.
+6. **Zero Hardcoding Dynamic Memory** ([`memory_manager.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/memory_manager.py)):
+   * Learns Abhishek's profile, skills, contacts, and chronological career progression directly from your data without any hardcoded assumptions.
 
 ---
 
 ## Quick Start: Launching Alisa
 
+Both `./alisa.sh` and `./alisha.sh` work identically:
+
 ### 1. Production Dashboard & Control Center
 ```bash
+./alisha.sh
+# or
 ./alisa.sh
 ```
-Launches the full interactive terminal application with system metrics, memory inspection, one-click fine-tuning, knowledge ingestion, and audio diagnostics.
 
-### 2. Hands-Free Wake-Word Mode (Alexa / Siri Experience)
+### 2. Direct CLI Commands & Shortcuts
 ```bash
-./alisa.sh --listen
-# OR from inside the console: /listen
-```
-* **To Wake:** Say **"Alisa"** or **"Hey Alisa"** (chime plays).
-* **To Sleep:** Say **"Stop listening"**, **"Go to sleep"**, or press `Ctrl+C` — the microphone shuts down smoothly and returns you to the menu!
+# Generate executive system & productivity briefing:
+./alisha.sh --briefing
 
-### 3. System Control & Autonomous Agent Capabilities
-Alisa can directly control system settings and execute tasks:
-* *"What is my battery level?"* -> Checks battery % and power source.
-* *"Set volume to 50%"* / *"Mute volume"* -> Adjusts macOS system audio.
-* *"What are my system stats?"* -> Reports live RAM %, CPU load, and free disk space.
-* *"Open Chrome"* / *"Open Notes"* -> Launches macOS applications.
-* *"How did we fix the ffmpeg issue?"* -> Recalls exact troubleshooting solutions from lifelong memory.
-* `/run <command>` -> Executes terminal shell commands safely in the workspace.
+# Vocalize executive briefing:
+./alisha.sh --speak-briefing
+
+# Launch hands-free Alexa/Siri listening mode directly:
+./alisha.sh --listen
+
+# Download any base model into local cache:
+./alisha.sh --download-model Qwen/Qwen2.5-1.5B-Instruct
+
+# Inspect all model versions and active status:
+./alisha.sh --versions
+
+# Roll back to the previous model version:
+./alisha.sh --rollback
+
+# Roll back directly to the clean Fresh Base Model (v0):
+./alisha.sh --fresh
+
+# Run system hardware & pipeline diagnostics:
+./alisha.sh --diag
+```
 
 ---
 
 ## Commands Inside Alisa
 
+* `/briefing` — Generate proactive executive system briefing (power, memory, disk, AI status)
+* `/good` — Record positive feedback on previous response (RLHF human alignment)
+* `/bad <correction>` — Correct previous response and queue for fine-tuning alignment
+* `/episodes` or `/diary` — View chronological daily milestones and activity diary
+* `/workflow [name]` — View or save developer execution procedures (e.g., `/workflow deploy = git pull | pip install`)
+* `/feedback` — View human feedback alignment statistics
+
+* `/version` or `/models` — View all model versions, creation dates, training samples, and active status
+* `/rollback` — Hot-swap back to previous model version without exiting
+* `/fresh` — Revert instantly to untuned Fresh Base Model (v0)
+* `/switch <vX>` — Switch active model to specific version (e.g., `/switch v1`)
+* `/download <model_id>` — Download and cache any Hugging Face model
 * `/listen` — Enter hands-free continuous Alexa/Siri mode (say "Alisa" to trigger, "stop" to sleep)
 * `/speak` — Push-to-talk mic mode (records 5s with MLX Whisper)
 * `/voice` — Toggle spoken voice output on or off
@@ -50,28 +85,12 @@ Alisa can directly control system settings and execute tasks:
 * `/stats` — View live RAM, CPU load, and free disk storage
 * `/solutions` — View lifelong documented error resolutions and fixes
 * `/history` — Review past conversation interactions
-* `/run <command>` — Execute bash commands directly
+* `/run <command>` — Execute bash commands directly in the workspace
 * `/learn <file or text>` — Ingest and learn any file (`.pdf`, `.txt`, `.csv`, etc.) or note
 * `/scan` — Ingest all files dropped in the `inbox/` directory
 * `/attach` or `/rag on` — Attach ChromaDB vector search
 * `/detach` or `/rag off` — Detach ChromaDB (answers purely from memory & model)
-* `/rag status` — Check ChromaDB connection status and chunk count
 * `/memory` — View dynamically discovered memory profile and learned knowledge
 * `/remember <key>: <value>` — Save a custom fact to persistent memory
 * `/help` — List all available commands
 * `exit` — Quit Alisa
-
-### Switching Base Models or Frameworks
-
-* **Train with Qwen2.5-0.5B-Instruct on Apple Silicon (`mlx-lm`, default & low-RAM friendly)**:
-  ```bash
-  python3 finetune.py --model Qwen/Qwen2.5-0.5B-Instruct --backend mlx
-  ```
-* **Train with Llama-3.2-1B-Instruct on Apple Silicon (`mlx-lm`)**:
-  ```bash
-  python3 finetune.py --model meta-llama/Llama-3.2-1B-Instruct --backend mlx
-  ```
-* **Train with Qwen2.5-1.5B-Instruct on PyTorch MPS/CPU (`peft`)**:
-  ```bash
-  python3 finetune.py --model Qwen/Qwen2.5-1.5B-Instruct --backend hf
-  ```
