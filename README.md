@@ -1,6 +1,27 @@
 # Alisa — Abhishek's Autonomous All-Rounder Personal Voice AI Assistant
 
-A zero-hardcoding, fully autonomous local AI assistant named **Alisa** optimized for Apple Silicon (MacBook Air / M-Series) combining:
+[![macOS](https://img.shields.io/badge/Platform-macOS%20Apple%20Silicon-black?style=flat&logo=apple)](https://apple.com)
+[![Metal GPU](https://img.shields.io/badge/GPU-Metal%20Accelerated%20(MLX)-blue)](https://github.com/ml-explore/mlx)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+## 🚀 1-Line Universal Mac Installer
+
+Give this single command to any Mac user. They paste it into their terminal and press Enter — everything is installed and ready automatically:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Abhishek543-dotcom/alisa---llm-assistant-/main/install.sh)"
+```
+
+*What the installer does automatically:*
+1. Detects Apple Silicon Metal GPU (`arm64`) vs Intel (`x86_64`).
+2. Checks and prepares Python 3 environment.
+3. Clones and configures Alisa in `~/alisa` with an isolated virtual environment (`.venv`).
+4. Pre-caches base LLM models (`Qwen2.5-0.5B`, `Whisper Tiny`, and BGE Embeddings).
+5. Creates a global **`alisa`** command in `~/.local/bin` so you can launch Alisa from **ANY** terminal window.
+
+---
+
+### Features & Architecture
 1. **Wake-Word & Hands-Free Interaction** ([`voice_engine.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/voice_engine.py)):
    * **Wake Word:** Say `"Alisa"` or `"Hey Alisa"` anytime to wake her up like Alexa or Siri.
    * **Wake Chime:** Plays macOS native alert sound (`Tink.aiff`) on activation.
