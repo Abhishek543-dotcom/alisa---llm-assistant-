@@ -6,18 +6,30 @@
 
 ## 🚀 1-Line Universal Mac Installer
 
-Give this single command to any Mac user. They paste it into their terminal and press Enter — everything is installed and ready automatically:
+`install.sh` is committed and live on GitHub on both the `main` and `feature` branches.
+
+### You Can Now Run the Command
+
+Paste this exact command into any Mac terminal:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Abhishek543-dotcom/alisa---llm-assistant-/main/install.sh)"
 ```
 
-*What the installer does automatically:*
-1. Detects Apple Silicon Metal GPU (`arm64`) vs Intel (`x86_64`).
-2. Checks and prepares Python 3 environment.
-3. Clones and configures Alisa in `~/alisa` with an isolated virtual environment (`.venv`).
-4. Pre-caches base LLM models (`Qwen2.5-0.5B`, `Whisper Tiny`, and BGE Embeddings).
-5. Creates a global **`alisa`** command in `~/.local/bin` so you can launch Alisa from **ANY** terminal window.
+### Verified Live Status
+
+The installer script is verified live and responding with `HTTP 200 OK`:
+```bash
+curl -sI https://raw.githubusercontent.com/Abhishek543-dotcom/alisa---llm-assistant-/main/install.sh
+```
+
+*What the installer does automatically on any Mac:*
+1. **System & Architecture:** Verifies macOS & enables Apple Silicon Metal GPU acceleration (`arm64`).
+2. **Prerequisites:** Auto-detects and verifies Python 3.10+ and Git.
+3. **Repository Setup:** Clones and configures Alisa in `~/alisa` with an isolated virtual environment (`.venv`).
+4. **Base Model Pre-Caching:** Pre-caches `Qwen2.5-0.5B`, `Whisper Tiny` (Metal STT), and BGE vector embeddings.
+5. **Global CLI Shortcuts:** Creates global `alisa` and `alisha` commands in `~/.local/bin` (and adds to `$PATH`).
+6. **Completion Chime:** Plays native macOS alert chime and announces readiness with Samantha voice synthesis.
 
 ---
 
