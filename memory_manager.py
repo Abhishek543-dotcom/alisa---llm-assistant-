@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
 memory_manager.py
-Zero-Hardcoding Dynamic Memory & Profile System:
-  - ZERO static assumptions or hardcoded company names.
-  - Everything is learned dynamically from emails, documents, and user interactions.
-  - Chronological awareness: automatically determines the latest company and role based on the newest timestamp.
-  - Persists dynamic knowledge in data/profile_memory.json.
+Multi-Tier Cognitive Memory Engine for Alisa:
+  1. Semantic & Profile Memory (data/profile_memory.json):
+     - Discovered profile, career progression, skills, CTC, and custom preferences.
+  2. Episodic Memory (data/episodic_memory.json):
+     - Chronological daily diary of activities, milestones, and sessions.
+  3. Procedural Memory (data/procedural_memory.json):
+     - Reusable developer workflows, bash runbooks, and task execution steps.
+  4. Human Feedback & Preference Memory (data/preference_pairs.jsonl):
+     - Reinforcement learning via user feedback (/good, /bad <correction>).
+  5. Lifelong Error & Bug Resolutions (data/solution_memory.json):
+     - Troubleshot issues, root causes, and verified fixes.
+  6. Interaction History (data/conversation_history.jsonl):
+     - Lifelong multi-turn conversation memory.
 """
 
+import datetime
 import email.utils
 import json
 import os
@@ -19,6 +28,9 @@ from typing import Any, Dict, List, Optional
 MEMORY_FILE = "data/profile_memory.json"
 HISTORY_FILE = "data/conversation_history.jsonl"
 SOLUTIONS_FILE = "data/solution_memory.json"
+EPISODIC_FILE = "data/episodic_memory.json"
+PROCEDURAL_FILE = "data/procedural_memory.json"
+PREFERENCES_FILE = "data/preference_pairs.jsonl"
 
 DISALLOWED_SUBSTRINGS = [
     "experience", "designation", "location", "salary", "ctc", "notice",
@@ -31,7 +43,6 @@ DISALLOWED_SUBSTRINGS = [
 def clean_entity_value(raw: str) -> Optional[str]:
     """Cleans an extracted entity value dynamically without hardcoding."""
     cleaned = re.sub(r"[\*\_#`]", "", raw).strip()
-    # Strip leading/trailing punctuation/bullets
     cleaned = re.sub(r"^[\s\:\-\>\•\(\)]+", "", cleaned).strip()
     cleaned = re.sub(r"[\s\:\-]+$", "", cleaned).strip()
 
@@ -78,6 +89,10 @@ class MemoryManager:
         with open(self.memory_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
+    # =========================================================================
+    # 1. Interaction History
+    # =========================================================================
+
     def log_interaction(self, query: str, answer: str, source: str = "console") -> None:
         """Appends conversation turn to persistent history for lifelong memory."""
         os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
@@ -94,17 +109,160 @@ class MemoryManager:
         """Retrieves the last N conversation interactions."""
         if not os.path.exists(HISTORY_FILE):
             return []
-        lines = []
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 lines = [line.strip() for line in f if line.strip()]
-            recent = [json.loads(l) for l in lines[-limit:]]
-            return recent
+            return [json.loads(l) for l in lines[-limit:]]
         except Exception:
             return []
 
+    # =========================================================================
+    # 2. Episodic Daily Memory (Daily diary & timeline)
+    # =========================================================================
+
+    def log_episode(self, event: str, category: str = "general", details: str = "") -> None:
+        """Logs an episodic event under today's date bucket."""
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        now_time = datetime.datetime.now().strftime("%H:%M")
+        episodes = self.load_episodes()
+
+        if today not in episodes:
+            episodes[today] = []
+
+        episodes[today].append({
+            "time": now_time,
+            "category": category,
+            "event": event.strip(),
+            "details": details.strip(),
+        })
+
+        os.makedirs(os.path.dirname(EPISODIC_FILE) or ".", exist_ok=True)
+        with open(EPISODIC_FILE, "w", encoding="utf-8") as f:
+            json.dump(episodes, f, indent=2, ensure_ascii=False)
+
+    def load_episodes(self) -> Dict[str, List[Dict[str, str]]]:
+        if not os.path.exists(EPISODIC_FILE):
+            return {}
+        try:
+            with open(EPISODIC_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def get_recent_episodes_summary(self, days: int = 3) -> str:
+        """Returns readable episodic recap of recent days."""
+        episodes = self.load_episodes()
+        if not episodes:
+            return "No episodic milestones logged yet."
+
+        sorted_dates = sorted(episodes.keys(), reverse=True)[:days]
+        lines = []
+        for d in sorted_dates:
+            lines.append(f"📅 [{d}]:")
+            for ev in episodes[d]:
+                det = f" ({ev['details']})" if ev.get("details") else ""
+                lines.append(f"  • {ev.get('time', '')} [{ev.get('category', 'task')}] {ev.get('event')}{det}")
+        return "\n".join(lines)
+
+    # =========================================================================
+    # 3. Procedural Memory (Workflows, Runbooks, Step-by-Step guides)
+    # =========================================================================
+
+    def save_procedure(self, name: str, steps: List[str], trigger: str = "", notes: str = "") -> str:
+        """Saves a developer runbook or task workflow."""
+        procedures = self.load_procedures()
+        slug = re.sub(r"[^a-z0-9_]+", "_", name.lower().strip())
+        procedures[slug] = {
+            "name": name.strip(),
+            "trigger": trigger.strip() or f"How to {name}",
+            "steps": steps,
+            "notes": notes.strip(),
+            "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        os.makedirs(os.path.dirname(PROCEDURAL_FILE) or ".", exist_ok=True)
+        with open(PROCEDURAL_FILE, "w", encoding="utf-8") as f:
+            json.dump(procedures, f, indent=2, ensure_ascii=False)
+        return f"Saved procedure: '{name}' with {len(steps)} steps."
+
+    def load_procedures(self) -> Dict[str, Any]:
+        if not os.path.exists(PROCEDURAL_FILE):
+            return {}
+        try:
+            with open(PROCEDURAL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def search_procedures(self, query: str) -> List[Dict[str, Any]]:
+        procedures = self.load_procedures()
+        q_words = query.lower().split()
+        matches = []
+        for p in procedures.values():
+            haystack = f"{p['name']} {p['trigger']} {' '.join(p['steps'])} {p.get('notes', '')}".lower()
+            if any(w in haystack for w in q_words):
+                matches.append(p)
+        return matches
+
+    # =========================================================================
+    # 4. Human Feedback & Preference Memory (RLHF / DPO Pairs)
+    # =========================================================================
+
+    def record_feedback(
+        self,
+        prompt: str,
+        response: str,
+        rating: str,
+        correction: str = "",
+    ) -> str:
+        """
+        Records human reinforcement feedback (/good or /bad <correction>).
+        Feeds into preference alignment and continuous fine-tuning.
+        """
+        os.makedirs(os.path.dirname(PREFERENCES_FILE) or ".", exist_ok=True)
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "prompt": prompt.strip(),
+            "rating": rating.lower().strip(),  # "positive" or "negative"
+            "original_response": response.strip(),
+            "chosen_response": correction.strip() if (rating == "negative" and correction) else response.strip(),
+            "rejected_response": response.strip() if rating == "negative" else "",
+        }
+        with open(PREFERENCES_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Also log as an episodic memory event
+        feedback_label = "Positive Thumbs-Up" if rating == "positive" else "Correction Recorded"
+        self.log_episode(
+            event=f"User Feedback: {feedback_label}",
+            category="alignment",
+            details=f"Prompt: {prompt[:60]}...",
+        )
+        return "Feedback recorded and queued for continuous learning alignment!"
+
+    def get_preference_stats(self) -> Dict[str, int]:
+        if not os.path.exists(PREFERENCES_FILE):
+            return {"positive": 0, "negative": 0, "total": 0}
+        pos = 0
+        neg = 0
+        try:
+            with open(PREFERENCES_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    item = json.loads(line)
+                    if item.get("rating") == "positive":
+                        pos += 1
+                    elif item.get("rating") == "negative":
+                        neg += 1
+        except Exception:
+            pass
+        return {"positive": pos, "negative": neg, "total": pos + neg}
+
+    # =========================================================================
+    # 5. Lifelong Error Solutions
+    # =========================================================================
+
     def save_solution(self, issue: str, resolution: str, root_cause: str = "", tags: Optional[List[str]] = None) -> str:
-        """Saves a troubleshooting fix to lifelong solution memory."""
         solutions = self.load_solutions()
         sol_id = f"sol_{len(solutions) + 1:03d}"
         new_entry = {
@@ -121,7 +279,6 @@ class MemoryManager:
         return f"Stored solution [{sol_id}]: {issue}"
 
     def load_solutions(self) -> List[Dict[str, Any]]:
-        """Loads all documented error resolutions."""
         if not os.path.exists(SOLUTIONS_FILE):
             return []
         try:
@@ -131,7 +288,6 @@ class MemoryManager:
             return []
 
     def search_solutions(self, query: str) -> List[Dict[str, Any]]:
-        """Searches past resolved errors by keywords."""
         solutions = self.load_solutions()
         words = query.lower().split()
         matches = []
@@ -142,15 +298,29 @@ class MemoryManager:
         return matches
 
     def get_solution_summary(self) -> str:
-        """Returns concise summary of past fixes for model prompt."""
         solutions = self.load_solutions()
         if not solutions:
             return ""
         lines = ["=== LIFELONG ERROR & SOLUTION MEMORY (HOW ISSUES WERE RESOLVED) ==="]
-        for s in solutions[-5:]:  # Most recent 5
+        for s in solutions[-5:]:
             lines.append(f"• Issue: {s['issue']}")
             lines.append(f"  Fix: {s['resolution']}")
         return "\n".join(lines)
+
+    # =========================================================================
+    # 6. Profile & Custom Notes
+    # =========================================================================
+
+    def remember(self, key: str, value: str) -> str:
+        """Stores custom persistent fact or preference."""
+        clean_k = key.strip()
+        clean_v = value.strip()
+        if not self.data.get("custom_notes"):
+            self.data["custom_notes"] = {}
+        self.data["custom_notes"][clean_k] = clean_v
+        self._save()
+        self.log_episode(f"Learned preference: {clean_k} = {clean_v}", category="preference")
+        return f"Saved to memory: '{clean_k}' = '{clean_v}'"
 
     def recall(self, key: Optional[str] = None) -> Any:
         if key:
@@ -171,10 +341,9 @@ class MemoryManager:
         return "Not yet discovered from records."
 
     def get_summary(self) -> str:
-        """Generates dynamic memory summary for LLM prompt without any hardcoding."""
+        """Generates dynamic memory summary for LLM prompt."""
         lines = []
 
-        # Discovered profile attributes
         profile = self.data.get("discovered_profile", {})
         for k, v in profile.items():
             readable_k = k.replace("_", " ").title()
@@ -186,10 +355,9 @@ class MemoryManager:
         if self.data.get("latest_company"):
             lines.append(f"Current / Latest Company: {self.data['latest_company']}")
 
-        # Chronological career progression
         timeline = self.data.get("career_progression", [])
         if timeline:
-            lines.append("Chronological Career Progression (Discovered from emails):")
+            lines.append("Chronological Career Progression:")
             for item in timeline:
                 extra = []
                 if item.get("ctc"):
@@ -199,47 +367,33 @@ class MemoryManager:
                 extra_str = f" ({', '.join(extra)})" if extra else ""
                 lines.append(f"  • {item['date']}: {item['company']}{extra_str}")
 
-        # Custom notes
         notes = self.data.get("custom_notes", {})
         if notes:
             lines.append("User Notes & Preferences:")
             for k, v in notes.items():
                 lines.append(f"  • {k}: {v}")
 
-        if not lines:
-            return "No profile records discovered yet. Ingest emails or documents to learn."
+        # Include Procedural Runbooks if available
+        procs = self.load_procedures()
+        if procs:
+            lines.append("Saved Engineering Workflows & Runbooks:")
+            for p in list(procs.values())[:3]:
+                lines.append(f"  • [{p['name']}]: {' -> '.join(p['steps'][:3])}")
 
-        return "\n".join(lines)
+        return "\n".join(lines) if lines else "No profile records discovered yet. Ingest emails or documents to learn."
 
     def sync_from_corpus(self, corpus_path: str = "data/emails_corpus.jsonl") -> Dict[str, Any]:
-        """
-        Scans email corpus dynamically to extract company transitions, CTC, education,
-        and personal details WITHOUT any hardcoded names.
-        """
+        """Scans email corpus dynamically to extract company transitions, CTC, education."""
         if not os.path.exists(corpus_path):
             return self.data
 
-        # Dynamic regex extractors for common resume/intro fields
         pattern_company = re.compile(
             r"(?:Current Company|Current Organization|Current Employer)\s*[:\-]\s*([^\n\r,]+)",
             re.IGNORECASE,
         )
-        pattern_exp = re.compile(
-            r"(?:Total(?: IT)? Experience)\s*[:\-]\s*([^\n\r]+)",
-            re.IGNORECASE,
-        )
-        pattern_ctc = re.compile(
-            r"(?:Current CTC|CTC \(Fixed \+ Variable\)|Fixed CTC)\s*[:\-]\s*([^\n\r]+)",
-            re.IGNORECASE,
-        )
-        pattern_loc = re.compile(
-            r"(?:Current Location)\s*[:\-]\s*([^\n\r]+)",
-            re.IGNORECASE,
-        )
-        pattern_father = re.compile(
-            r"(?:Father(?:'s)? Name)\s*[:\-]\s*([^\n\r]+)",
-            re.IGNORECASE,
-        )
+        pattern_exp = re.compile(r"(?:Total(?: IT)? Experience)\s*[:\-]\s*([^\n\r]+)", re.IGNORECASE)
+        pattern_ctc = re.compile(r"(?:Current CTC|CTC \(Fixed \+ Variable\)|Fixed CTC)\s*[:\-]\s*([^\n\r]+)", re.IGNORECASE)
+        pattern_loc = re.compile(r"(?:Current Location)\s*[:\-]\s*([^\n\r]+)", re.IGNORECASE)
 
         detected_events = []
         discovered_info = dict(self.data.get("discovered_profile", {}))
@@ -258,21 +412,12 @@ class MemoryManager:
                 except Exception:
                     continue
 
-                # Check father name
-                m_father = pattern_father.search(body)
-                if m_father:
-                    val = clean_entity_value(m_father.group(1))
-                    if val and "father_name" not in discovered_info:
-                        discovered_info["father_name"] = val
-
-                # Check location
                 m_loc = pattern_loc.search(body)
                 if m_loc:
                     val = clean_entity_value(m_loc.group(1))
                     if val and "location" not in discovered_info:
                         discovered_info["location"] = val
 
-                # Check company
                 m_comp = pattern_company.search(body)
                 if m_comp:
                     comp_name = clean_entity_value(m_comp.group(1))
@@ -288,10 +433,7 @@ class MemoryManager:
                         })
 
         if detected_events:
-            # Sort chronologically by timestamp (newest last)
             detected_events.sort(key=lambda x: x["timestamp"])
-
-            # Clean and deduplicate chronological timeline
             timeline = []
             seen_companies = set()
             for ev in detected_events:
@@ -320,6 +462,9 @@ class MemoryManager:
 
 if __name__ == "__main__":
     mgr = MemoryManager()
-    mgr.sync_from_corpus()
-    print("=== DYNAMICALLY DISCOVERED MEMORY (0 HARDCODING) ===")
+    print("=== DYNAMICALLY DISCOVERED COGNITIVE MEMORY ===")
     print(mgr.get_summary())
+    print("\n=== RECENT EPISODIC TIMELINE ===")
+    print(mgr.get_recent_episodes_summary())
+    print("\n=== HUMAN PREFERENCE STATS ===")
+    print(mgr.get_preference_stats())
