@@ -25,6 +25,7 @@ def run_mlx_lora(
     lora_layers: int,
     max_seq_length: int = 1024,
     grad_checkpoint: bool = True,
+    resume: bool = True,
 ) -> None:
     os.makedirs(adapter_dir, exist_ok=True)
     clean_model_id = re.sub(r"\s+", "", model_id.strip())
@@ -46,9 +47,15 @@ def run_mlx_lora(
         str(lora_layers),
         "--max-seq-length",
         str(max_seq_length),
+        "--mask-prompt",
         "--adapter-path",
         adapter_dir,
     ]
+    resume_file = os.path.join(adapter_dir, "adapters.safetensors")
+    if resume and os.path.exists(resume_file):
+        cmd.extend(["--resume-adapter-file", resume_file])
+        print(f"[finetune] Resuming incremental training from existing adapter: {resume_file}")
+
     if grad_checkpoint:
         cmd.append("--grad-checkpoint")
     print(f"[finetune] Running MLX LoRA fine-tuning:\n  {' '.join(cmd)}")
@@ -147,6 +154,7 @@ def main() -> None:
     parser.add_argument("--lora-layers", type=int, default=16, help="Number of transformer layers to adapt in MLX")
     parser.add_argument("--max-seq-length", type=int, default=1024, help="Maximum sequence length (default: 1024)")
     parser.add_argument("--no-grad-checkpoint", action="store_true", help="Disable gradient checkpointing")
+    parser.add_argument("--no-resume", action="store_true", help="Do not resume from existing adapter, start fresh")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate for HF PEFT")
     args = parser.parse_args()
     args.model = re.sub(r"\s+", "", args.model.strip())
@@ -170,6 +178,7 @@ def main() -> None:
             args.lora_layers,
             max_seq_length=args.max_seq_length,
             grad_checkpoint=not args.no_grad_checkpoint,
+            resume=not args.no_resume,
         )
     else:
         run_hf_peft(args.model, args.data_dir, args.adapter_dir, args.epochs, args.batch_size, args.lr)

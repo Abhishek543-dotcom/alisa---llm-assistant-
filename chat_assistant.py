@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 chat_assistant.py
-Hybrid RAG + LoRA Personal Assistant:
-  1. Queries your local ChromaDB vector index for the top-k relevant emails (exact facts, dates, senders)
-  2. Feeds the retrieved context into your fine-tuned Qwen2.5-1.5B-Instruct / Llama-3.2-1B-Instruct LoRA model
+Abhishek's Autonomous Personal AI Assistant:
+  1. Zero Hardcoding: Learns everything dynamically from emails, documents, and dropped files.
+  2. Autonomous Learning Engine: Ingests any file (.pdf, .txt, .csv, .json, .py, etc.) using /learn or inbox/.
+  3. Dynamic ChromaDB Attach / Detach on demand (/attach, /detach, /rag on, /rag off).
+  4. Ultra-Fast Voice Features: Text-to-Speech (macOS say) & Speech-to-Text (Apple Silicon MLX Whisper).
+  5. Persistent Discovered Memory: Dynamically tracks chronological career progression and personal facts.
 """
 
 import argparse
@@ -12,64 +15,76 @@ import platform
 import re
 from typing import List
 
-import chromadb
-from sentence_transformers import SentenceTransformer
+from auto_learner import AutoLearner, ingest_inbox_directory
+from memory_manager import MemoryManager
+from rag_engine import RAGEngine
+from voice_engine import VoiceEngine
+
+CONVERSATIONAL_GREETINGS = {
+    "hello",
+    "hi",
+    "hey",
+    "howdy",
+    "greetings",
+    "who are you",
+    "what can you do",
+    "help",
+    "good morning",
+    "good evening",
+    "good afternoon",
+}
 
 
-def retrieve_email_context(query: str, db_dir: str, embedder: SentenceTransformer, top_k: int = 5) -> str:
-    if not os.path.exists(db_dir):
-        return ""
-    client = chromadb.PersistentClient(path=db_dir)
-    collection = client.get_collection(name="personal_emails")
-    q_emb = embedder.encode([query], normalize_embeddings=True).tolist()
-    results = collection.query(query_embeddings=q_emb, n_results=top_k)
-    docs: List[str] = results.get("documents", [[]])[0]
-    if not docs:
-        return ""
-    formatted = "\n\n---\n\n".join(f"[Email Snippet {i+1}]\n{doc}" for i, doc in enumerate(docs))
-    return formatted
+def generate_mlx(
+    model,
+    tokenizer,
+    messages: List[dict],
+    max_tokens: int = 512,
+    sampler=None,
+    logits_processors=None,
+) -> str:
+    from mlx_lm import generate
 
-
-def generate_mlx(model_id: str, adapter_dir: str, messages: List[dict], max_tokens: int = 512) -> str:
-    from mlx_lm import generate, load
-
-    adapter_arg = adapter_dir if os.path.exists(adapter_dir) else None
-    model, tokenizer = load(model_id, adapter_path=adapter_arg)
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    return generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+    return generate(
+        model,
+        tokenizer,
+        prompt=prompt,
+        max_tokens=max_tokens,
+        sampler=sampler,
+        logits_processors=logits_processors,
+        verbose=False,
+    )
 
 
-def generate_hf(model_id: str, adapter_dir: str, messages: List[dict], max_tokens: int = 512) -> str:
+def generate_hf(model, tokenizer, device: str, messages: List[dict], max_tokens: int = 512) -> str:
     import torch
-    from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.float16 if device in ("mps", "cuda") else torch.float32
-
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    base_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype).to(device)
-    if os.path.exists(adapter_dir):
-        model = PeftModel.from_pretrained(base_model, adapter_dir).to(device)
-    else:
-        model = base_model
 
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=max_tokens, temperature=0.3, do_sample=True)
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            temperature=0.3,
+            repetition_penalty=1.15,
+            do_sample=True,
+        )
     generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
     return tokenizer.decode(generated_ids, skip_special_tokens=True)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ask questions or draft emails with your Hybrid RAG + LoRA LLM.")
+    parser = argparse.ArgumentParser(description="Abhishek's Autonomous AI Assistant with Voice & Dynamic Learning.")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="Base model ID")
     parser.add_argument("--adapter-dir", default="adapters/personal_lora", help="Trained LoRA adapter directory")
+    parser.add_argument("--no-adapter", action="store_true", help="Run base model directly without LoRA adapter")
     parser.add_argument("--db-dir", default="chroma_db", help="ChromaDB directory")
+    parser.add_argument("--no-rag", action="store_true", help="Start with ChromaDB detached")
+    parser.add_argument("--no-voice", action="store_true", help="Disable spoken voice output (macOS say is ON by default)")
     parser.add_argument("--embedding-model", default="BAAI/bge-small-en-v1.5", help="Embedding model ID")
     parser.add_argument("--backend", choices=["auto", "mlx", "hf"], default="auto", help="Inference backend")
-    parser.add_argument("--top-k", type=int, default=5, help="Number of emails to retrieve via RAG")
+    parser.add_argument("--top-k", type=int, default=4, help="Number of emails/docs to retrieve via RAG")
     parser.add_argument("--query", default=None, help="Single question to ask (launches interactive shell if omitted)")
     args = parser.parse_args()
     args.model = re.sub(r"\s+", "", args.model.strip())
@@ -83,36 +98,220 @@ def main() -> None:
         except ImportError:
             backend = "hf"
 
-    embedder = SentenceTransformer(args.embedding_model)
+    # Initialize Modules (Zero Hardcoding)
+    memory = MemoryManager()
+    rag = RAGEngine(
+        db_dir=args.db_dir,
+        embedding_model=args.embedding_model,
+        attached=(not args.no_rag),
+    )
+    learner = AutoLearner(db_dir=args.db_dir)
+    voice = VoiceEngine(tts_enabled=(not args.no_voice))
 
-    def answer_question(user_query: str) -> str:
-        context = retrieve_email_context(user_query, args.db_dir, embedder, top_k=args.top_k)
+    use_adapter = not args.no_adapter and os.path.exists(args.adapter_dir)
+    adapter_path = args.adapter_dir if use_adapter else None
+
+    sampler = None
+    logits_processors = None
+    hf_device = None
+
+    if backend == "mlx":
+        from mlx_lm import load
+        from mlx_lm.sample_utils import make_logits_processors, make_sampler
+
+        print(f"Loading MLX model {args.model}" + (f" with adapter {adapter_path}..." if adapter_path else "..."))
+        model, tokenizer = load(args.model, adapter_path=adapter_path)
+        sampler = make_sampler(temp=0.3, top_p=0.9)
+        logits_processors = make_logits_processors(repetition_penalty=1.15)
+    else:
+        import torch
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        hf_device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+        dtype = torch.float16 if hf_device in ("mps", "cuda") else torch.float32
+        print(f"Loading HF model {args.model} on {hf_device}...")
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        base_model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype).to(hf_device)
+        if adapter_path:
+            model = PeftModel.from_pretrained(base_model, adapter_path).to(hf_device)
+        else:
+            model = base_model
+
+    def answer_question(user_query: str, speak_sync: bool = False) -> str:
+        # Check conversational greetings
+        clean_q = user_query.strip().lower().rstrip("!?.")
+        if clean_q in CONVERSATIONAL_GREETINGS:
+            email_context = ""
+        elif rag.is_attached:
+            email_context = rag.search_and_format(user_query, top_k=args.top_k)
+        else:
+            email_context = "ChromaDB vector search is currently detached. Use working memory below."
+
+        dynamic_memory = memory.get_summary()
+        learned_summary = learner.get_summary()
+
         system_content = (
-            "You are Abhishek Tiwari's personal AI assistant trained on his email archive. "
-            "Use the retrieved email snippets below to answer accurately with exact dates, names, and facts, "
-            "while matching Abhishek's personal communication style.\n\n"
-            f"RETRIEVED EMAIL CONTEXT:\n{context or 'No matching emails found.'}"
+            "You are Abhishek Tiwari's autonomous personal AI assistant.\n\n"
+            "=== DYNAMIC WORKING MEMORY (DISCOVERED ABOUT ABHISHEK - ZERO HARDCODING) ===\n"
+            f"{dynamic_memory}\n\n"
+            f"{learned_summary}\n\n"
+            "=== RETRIEVED EVIDENCE FROM ARCHIVES & DOCUMENTS ===\n"
+            f"{email_context}\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "1. DISTILL AND SYNTHESIZE: Extract the exact answers and facts. Do NOT simply copy-paste or regurgitate raw text.\n"
+            "2. CHRONOLOGICAL RECENCY: When asked about current company or role, always refer to the newest chronological discovery in memory.\n"
+            "3. HONESTY: If a specific fact is not discovered in memory or documents, say: 'I could not find that information in your records.' Never guess or hallucinate.\n"
+            "4. EMAIL DRAFTING: Only format as an email if the user explicitly asks to draft/write an email. For all other queries, answer directly in normal sentences."
         )
+
         messages = [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_query},
         ]
+
         if backend == "mlx":
-            return generate_mlx(args.model, args.adapter_dir, messages)
-        return generate_hf(args.model, args.adapter_dir, messages)
+            reply = generate_mlx(
+                model,
+                tokenizer,
+                messages,
+                max_tokens=512,
+                sampler=sampler,
+                logits_processors=logits_processors,
+            )
+        else:
+            reply = generate_hf(model, tokenizer, hf_device, messages, max_tokens=512)
+
+        # Trigger spoken speech if enabled
+        if voice.tts_enabled:
+            print("\n[🔊 Speaking response...]")
+            voice.speak(reply, non_blocking=(not speak_sync))
+        return reply
 
     if args.query:
-        print(answer_question(args.query))
+        ans = answer_question(args.query, speak_sync=True)
+        print(ans)
         return
 
-    print("Personal Email LLM + RAG Assistant ready. Type 'exit' to quit.")
+    print("=" * 65)
+    print("🚀 Abhishek's Autonomous Personal AI Assistant")
+    print(f"   • ChromaDB RAG: {'ATTACHED (' + str(rag.count_chunks()) + ' chunks)' if rag.is_attached else 'DETACHED'}")
+    print(f"   • Voice Speech (TTS): {'ENABLED (macOS say)' if voice.tts_enabled else 'MUTED (Type /voice to enable)'}")
+    print(f"   • Drop Folder: inbox/ (drop any file to learn autonomously)")
+    print("=" * 65)
+    print("   [Commands]")
+    print("   /speak                   -> Speak your question via microphone (MLX Whisper)")
+    print("   /voice                   -> Toggle spoken voice output (TTS)")
+    print("   /learn <file or note>    -> Ingest, index, and learn from any file or text")
+    print("   /scan                    -> Ingest all files dropped in inbox/")
+    print("   /attach | /detach        -> Attach or detach ChromaDB vector search")
+    print("   /memory                  -> View dynamically discovered memory profile")
+    print("   /remember <key>: <value> -> Add a custom fact to memory")
+    print("   /help                    -> Show commands")
+    print("   exit                     -> Quit assistant")
+    print("=" * 65)
+
     while True:
         try:
             q = input("\nYou > ").strip()
         except (EOFError, KeyboardInterrupt):
             break
-        if not q or q.lower() in ("exit", "quit"):
+        if not q:
+            continue
+        if q.lower() in ("exit", "quit"):
             break
+
+        lower_q = q.lower()
+
+        # Voice STT
+        if lower_q == "/speak":
+            spoken_text = voice.record_and_transcribe(duration_seconds=5)
+            if not spoken_text:
+                print("[Voice] No speech detected.")
+                continue
+            if spoken_text.startswith("["):
+                print(f"\n{spoken_text}")
+                continue
+            print(f"\nYou (Voice) > {spoken_text}")
+            q = spoken_text
+
+        # Voice TTS toggle
+        elif lower_q in ("/voice", "/voice on", "/voice off"):
+            if "on" in lower_q:
+                voice.tts_enabled = True
+                print("\n[Voice] Voice speech output (TTS) turned ON.")
+            elif "off" in lower_q:
+                voice.tts_enabled = False
+                print("\n[Voice] Voice speech output (TTS) turned OFF.")
+            else:
+                print(f"\n[Voice] {voice.toggle_tts()}")
+            continue
+
+        # Ingestion commands
+        elif lower_q.startswith("/learn"):
+            payload = q[len("/learn") :].strip()
+            if not payload:
+                print("Usage: /learn <path_to_file> OR /learn <any note or statement>")
+                continue
+            if os.path.exists(payload):
+                print(f"\n[AutoLearner] Processing file: {payload}...")
+                res = learner.learn_file(payload)
+            else:
+                print(f"\n[AutoLearner] Ingesting knowledge statement...")
+                res = learner.learn_text(payload)
+            print(res)
+            continue
+
+        elif lower_q in ("/scan", "/inbox"):
+            print("\n[AutoLearner] Scanning 'inbox/' directory...")
+            ingest_inbox_directory("inbox")
+            continue
+
+        # RAG Attach / Detach
+        elif lower_q in ("/attach", "/rag on"):
+            print(f"\n[RAG] {rag.attach()}")
+            continue
+        elif lower_q in ("/detach", "/rag off"):
+            print(f"\n[RAG] {rag.detach()}")
+            continue
+        elif lower_q in ("/rag status", "/status"):
+            print(f"\n[RAG] Attached: {rag.is_attached} | Indexed Chunks: {rag.count_chunks()} | DB: {args.db_dir}")
+            continue
+
+        # Memory commands
+        elif lower_q == "/memory":
+            print("\n=== DYNAMICALLY DISCOVERED MEMORY (0 HARDCODING) ===")
+            print(memory.get_summary())
+            print("\n=== LEARNED EXTERNAL KNOWLEDGE ===")
+            print(learner.get_summary())
+            continue
+
+        elif lower_q.startswith("/remember"):
+            rest = q[len("/remember") :].strip()
+            if ":" in rest:
+                k, v = rest.split(":", 1)
+                msg = memory.remember(k, v)
+            elif rest:
+                msg = memory.remember("note", rest)
+            else:
+                msg = "Usage: /remember <key>: <value>"
+            print(f"\n[Memory] {msg}")
+            continue
+
+        elif lower_q in ("/help", "/?"):
+            print("\nAvailable Commands:")
+            print("  /speak                   Speak question via microphone (MLX Whisper)")
+            print("  /voice                   Toggle spoken voice output (macOS say)")
+            print("  /learn <file or text>    Ingest and learn any file (.pdf, .txt, .csv) or note")
+            print("  /scan                    Ingest all files placed in the inbox/ folder")
+            print("  /attach                  Attach ChromaDB vector search")
+            print("  /detach                  Detach ChromaDB vector search")
+            print("  /rag status              Check vector database status")
+            print("  /memory                  View discovered profile and learned knowledge")
+            print("  /remember <key>: <value> Save a fact to memory")
+            print("  exit                     Quit")
+            continue
+
         print("\nAssistant >", answer_question(q))
 
 

@@ -290,17 +290,41 @@ def main() -> None:
     user_email = (args.user_email or detect_user_email(mbox) or "").lower()
     print(f"[parse_mbox] Detected user email: {user_email or 'Unknown (relying on Sent label)'}")
 
-    messages_by_id: Dict[str, Dict] = {}
+    corpus_path = os.path.join(args.output_dir, "emails_corpus.jsonl")
+    existing_message_ids = set()
     corpus_records: List[Dict] = []
+    messages_by_id: Dict[str, Dict] = {}
+
+    if os.path.exists(corpus_path):
+        print(f"[parse_mbox] Found existing corpus at {corpus_path}. Reading existing message IDs for incremental merge...")
+        with open(corpus_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                corpus_records.append(r)
+                mid = r.get("message_id")
+                if mid:
+                    existing_message_ids.add(mid)
+                    messages_by_id[mid] = r
+
+        print(f"[parse_mbox] Loaded {len(corpus_records)} existing emails. Scanning new .mbox for newly added emails...")
+
     skipped_count = 0
+    new_added_count = 0
 
     for idx, msg in enumerate(mbox):
         if args.max_emails is not None and idx >= args.max_emails:
             break
         if (idx + 1) % 5000 == 0:
-            print(f"[parse_mbox] Processed {idx + 1} emails ({len(corpus_records)} kept, {skipped_count} skipped)...")
+            print(f"[parse_mbox] Processed {idx + 1} emails ({new_added_count} new kept, {skipped_count} skipped)...")
 
         try:
+            msg_id = (msg.get("Message-ID") or f"<msg-{idx}>").strip()
+            if msg_id in existing_message_ids:
+                skipped_count += 1
+                continue
+
             from_raw = decode_mime_header(msg.get("From", ""))
             _, from_addr = email.utils.parseaddr(from_raw)
             from_addr_lower = from_addr.lower()
@@ -320,7 +344,6 @@ def main() -> None:
                 skipped_count += 1
                 continue
 
-            msg_id = (msg.get("Message-ID") or f"<msg-{idx}>").strip()
             in_reply_to = (msg.get("In-Reply-To") or "").strip()
             subject = decode_mime_header(msg.get("Subject", "(No Subject)"))
             to_raw = decode_mime_header(msg.get("To", ""))
@@ -340,11 +363,13 @@ def main() -> None:
             }
             corpus_records.append(record)
             messages_by_id[msg_id] = record
+            existing_message_ids.add(msg_id)
+            new_added_count += 1
         except Exception:
             skipped_count += 1
             continue
 
-    corpus_path = os.path.join(args.output_dir, "emails_corpus.jsonl")
+    print(f"[parse_mbox] Added {new_added_count} new emails (Total corpus: {len(corpus_records)} emails). Writing to {corpus_path}...")
     with open(corpus_path, "w", encoding="utf-8") as f:
         for rec in corpus_records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -402,6 +427,14 @@ def main() -> None:
     with open(valid_path, "w", encoding="utf-8") as f:
         for item in valid_set:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    try:
+        from memory_manager import MemoryManager
+        mem = MemoryManager()
+        mem.sync_from_corpus(corpus_path)
+        print(f"[parse_mbox] Successfully synchronized memory profile. Latest company detected: '{mem.get_latest_company()}'")
+    except Exception as e:
+        print(f"[parse_mbox] Note: memory profile sync skipped ({e})")
 
     print(f"[parse_mbox] Kept {len(corpus_records)} clean emails (filtered {skipped_count} spam/trash/promo emails).")
     print(f"[parse_mbox] Saved RAG corpus to {corpus_path}")

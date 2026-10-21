@@ -54,3 +54,4 @@ adapters/
 # Caches & Logs
 .cache/
 *.log
+inbox/

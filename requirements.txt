@@ -1,10 +1,16 @@
 # Core RAG & Embeddings
 chromadb>=0.5.0
 sentence-transformers>=3.0.0
+pypdf>=5.0.0
 
 # Apple Silicon MLX Fine-Tuning & Inference (macOS arm64)
 mlx>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'
 mlx-lm>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'
+
+# Voice Engine (Ultra-fast local STT with Apple Silicon Metal)
+mlx-whisper>=0.4.0
+sounddevice>=0.5.0
+soundfile>=0.14.0
 
 # Hugging Face Transformers + PEFT Fallback (MPS / CUDA / CPU)
 torch>=2.3.0

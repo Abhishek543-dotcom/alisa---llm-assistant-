@@ -21,17 +21,18 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 echo "=== 2. Parsing mbox & filtering Spam/Trash/Promotions ==="
-if [[ -f "data/emails_corpus.jsonl" && -f "data/train.jsonl" ]]; then
-    echo "Found existing processed dataset in data/ (3,947 clean emails, 487 train examples). Skipping parse."
-else
+if [[ "$MBOX_PATH" != "$DEFAULT_MBOX" || ! -f "data/emails_corpus.jsonl" ]]; then
+    echo "Parsing mbox archive: $MBOX_PATH..."
     python3 parse_mbox.py --mbox "$MBOX_PATH" --output-dir data
+else
+    echo "Found existing processed dataset in data/. Skipping parse (To incrementally add a new mbox, pass it as argument 1)."
 fi
 
 echo "=== 3. Building local ChromaDB RAG index ==="
-if [[ -f "chroma_db/chroma.sqlite3" ]]; then
-    echo "Found existing ChromaDB vector index in chroma_db/ (30,917 chunks). Skipping indexing."
-else
+if [[ "$MBOX_PATH" != "$DEFAULT_MBOX" || ! -f "chroma_db/chroma.sqlite3" ]]; then
     python3 build_rag.py --corpus data/emails_corpus.jsonl --db-dir chroma_db
+else
+    echo "Found existing ChromaDB vector index in chroma_db/."
 fi
 
 echo "=== 4. Fine-tuning $MODEL_ID with LoRA ($BACKEND backend) ==="

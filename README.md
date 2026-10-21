@@ -1,22 +1,40 @@
-# Personal Email LLM & Hybrid RAG Project
+# Autonomous Personal AI Assistant (Low-Resource & Voice-Enabled)
 
-This project turns your Gmail Takeout archive (`/Users/abhishektiwari/Downloads/All mail Including Spam and Trash-002.mbox` or local `All mail Including Spam and Trash-002.mbox`) into a **Hybrid Local AI Assistant** that combines:
-1. **LoRA Fine-Tuning** on [Qwen/Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) (lightweight, ~490M params, memory-friendly for MacBooks) or [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) / [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) using Apple Silicon [mlx-lm](https://github.com/ml-explore/mlx-lm) or Hugging Face [PEFT](https://github.com/huggingface/peft) so the model learns your personal writing style, tone, and reply patterns.
-2. **Local RAG Vector Search** using [ChromaDB](https://github.com/chroma-core/chroma) and [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) embeddings so your assistant retrieves exact dates, names, subjects, and historical facts from your emails without hallucinating.
+A zero-hardcoding, fully autonomous local AI assistant optimized for Apple Silicon (MacBook Air / M-Series) combining:
+1. **Zero Hardcoding Dynamic Memory** ([`memory_manager.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/memory_manager.py)): Learns your profile, contacts, and chronological career progression directly from your data without any hardcoded assumptions.
+2. **Universal Autonomous Learner** ([`auto_learner.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/auto_learner.py)): Drop ANY file (`.pdf`, `.txt`, `.csv`, `.json`, `.py`, `.mbox`, etc.) into `inbox/` or use `/learn`—it automatically parses, indexes into ChromaDB, extracts knowledge, and generates fine-tuning training pairs for future model training.
+3. **Ultra-Low Resource Voice Engine** ([`voice_engine.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/voice_engine.py)):
+   * **Text-to-Speech (TTS):** Uses macOS native `/usr/bin/say` (0 RAM, 0 GPU overhead, non-blocking).
+   * **Speech-to-Text (STT):** Uses Apple Silicon `mlx-whisper` (tiny model, ~75MB) running directly on Metal GPU for near-instant microphone voice transcription.
+4. **Dynamic ChromaDB Vector Search** ([`rag_engine.py`](file:///Users/abhishektiwari/Documents/dev/personal-email-llm/rag_engine.py)): Attach or detach vector search on the fly (`/attach`, `/detach`).
+5. **Temporal Awareness & Recency Priority**: Parses timestamps so newer records always take precedence (e.g. knowing your latest company from the newest emails).
+6. **Incremental Re-exports & Continuous Learning**: Export new emails or dump new files anytime; it deduplicates, embeds only new content, and supports resuming LoRA fine-tuning.
 
-## Project Structure
+## In-Chat Commands
 
-* `parse_mbox.py`: Streams your `.mbox` archive, strips out `Spam`, `Trash`, `Category Promotions`, `Category Updates`, `Category Social`, `Category Forums`, and automated `noreply` newsletters, and outputs `data/emails_corpus.jsonl` (for RAG) plus `data/train.jsonl` and `data/valid.jsonl` (for LoRA instruction tuning).
-* `build_rag.py`: Chunks `data/emails_corpus.jsonl` with email header metadata and indexes them into a persistent local `./chroma_db` vector database.
-* `finetune.py`: Fine-tunes `Qwen/Qwen2.5-0.5B-Instruct` (default, low VRAM) or `Qwen/Qwen2.5-1.5B-Instruct` with LoRA adapters using either `mlx-lm` (Apple Silicon unified memory) or Hugging Face `transformers` + `peft` + `trl`.
-* `chat_assistant.py`: Interactive CLI and single-query tool that retrieves the top-k matching emails from `./chroma_db` and generates grounded answers using your fine-tuned LoRA adapter.
-* `run_pipeline.sh`: End-to-end bash script to create `.venv`, install `requirements.txt`, parse the `.mbox`, build the RAG index, fine-tune the model, and start the assistant.
+Inside the assistant, you can run:
+* `/speak` — Speak your question hands-free via microphone (Apple Silicon MLX Whisper)
+* `/voice` — Toggle spoken voice output (TTS via macOS say)
+* `/learn <file or text>` — Ingest and learn any file (`.pdf`, `.txt`, `.csv`, etc.) or note
+* `/scan` — Ingest all files dropped in the `inbox/` directory
+* `/attach` or `/rag on` — Attach ChromaDB vector search
+* `/detach` or `/rag off` — Detach ChromaDB (assistant answers purely from memory & model)
+* `/rag status` — Check ChromaDB connection status and chunk count
+* `/memory` — View dynamically discovered memory profile and learned knowledge
+* `/remember <key>: <value>` — Save a custom fact to persistent memory
+* `/help` — List all available commands
+* `exit` — Quit assistant
 
 ## Quick Start
 
 ```bash
-chmod +x run_pipeline.sh
-./run_pipeline.sh
+source .venv/bin/activate
+python3 chat_assistant.py --no-adapter
+```
+
+To start directly with spoken voice enabled:
+```bash
+python3 chat_assistant.py --no-adapter --voice
 ```
 
 ### Switching Base Models or Frameworks
